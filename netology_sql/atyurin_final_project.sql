@@ -1,4 +1,4 @@
-create table Player
+create table player
 (
   id                 INTEGER
     primary key,
@@ -12,7 +12,7 @@ create table Player
   weight             NUMERIC
 );
 
-create table Player_Attributes
+create table player_attributes
 (
   id                  INTEGER
     primary key,
@@ -61,7 +61,7 @@ create table Player_Attributes
   gk_reflexes         INTEGER
 );
 
-create table Team
+create table team
 (
  id               INTEGER
    primary key,
@@ -72,7 +72,7 @@ create table Team
  team_short_name  TEXT
 )
 
-create table Team_Attributes
+create table team_attributes
 (
  id                             INTEGER
    primary key,
@@ -104,7 +104,7 @@ create table Team_Attributes
  defenceDefenderLineClass       TEXT
 )
 
-create table Country
+create table country
 (
   id   INTEGER
     primary key,
@@ -112,24 +112,24 @@ create table Country
     unique
 );
 
-create table League
+create table league
 (
   id         INTEGER
     primary key,
   country_id INTEGER
-    references Country,
+    references country,
   name       TEXT
     unique
 );
 
-create table Match
+create table match
 (
   id               INTEGER
     primary key,
   country_id       INTEGER
-    references Country,
+    references country,
   league_id        INTEGER
-    references League,
+    references league,
   season           TEXT,
   stage            INTEGER,
   date             TIMESTAMP,
@@ -151,13 +151,13 @@ create table Match
   possession       TEXT
 );
 
-copy player FROM 'd:\soccer_db\player.tsv' DELIMITER E'\t';
-copy player FROM 'd:\soccer_db\player_attributes.tsv' DELIMITER E'\t';
-copy player FROM 'd:\soccer_db\team.tsv' DELIMITER E'\t';
-copy player FROM 'd:\soccer_db\team_attributes.tsv' DELIMITER E'\t';
-copy player FROM 'd:\soccer_db\country.tsv' DELIMITER E'\t';
-copy player FROM 'd:\soccer_db\league.tsv' DELIMITER E'\t';
-copy player FROM 'd:\soccer_db\match.tsv' DELIMITER E'\t';
+copy player FROM '/soccer_db/player.tsv' DELIMITER E'\t';
+copy player_attributes FROM '/soccer_db/player_attributes.tsv' DELIMITER E'\t';
+copy team FROM '/soccer_db/team.tsv' DELIMITER E'\t';
+copy team_attributes FROM '/soccer_db/team_attributes.tsv' DELIMITER E'\t';
+copy country FROM '/soccer_db/country.tsv' DELIMITER E'\t';
+copy league FROM '/soccer_db/league.tsv' DELIMITER E'\t';
+copy match FROM '/soccer_db/match.tsv' DELIMITER E'\t';
 
 -- список лиг и стран
 SELECT * FROM League JOIN Country ON Country.id = League.country_id;
@@ -219,3 +219,36 @@ LEFT JOIN (SELECT player_attributes.player_api_id,
             AS pa_grouped ON player.player_api_id = pa_grouped.player_api_id
 GROUP BY ROUND(height)
 ORDER BY ROUND(height);
+
+-- кто точнее в ударах: левши или правши
+SELECT preferred_foot, avg(free_kick_accuracy) FROM player_attributes GROUP BY preferred_foot;
+
+-- процентное распределение ростов футболистов по квартилям
+-- 50% выше 183см, а в 185см укладываются 75%
+SELECT
+  percentile_cont(0.25) within group (ORDER BY ROUND(height) ASC) AS percentile_25,
+  percentile_cont(0.50) within group (ORDER BY ROUND(height) ASC) AS percentile_50,
+  percentile_cont(0.75) within group (ORDER BY ROUND(height) ASC) AS percentile_75,
+  percentile_cont(0.95) within group (ORDER BY ROUND(height) ASC) AS percentile_95
+FROM player;
+
+-- кто из футболистов выходил на поле в свой день рождения
+WITH match_dates as (SELECT DISTINCT to_char(date, 'DD-MM') as date from match)
+SELECT player.player_name FROM player
+JOIN match_dates on to_char(player.birthday, 'DD-MM') = match_dates.date;
+
+-- корреляция: насколько агрессивность игрока влияюет на частоту подкатов
+-- 0 - не влияет, 
+-- -1 - чем выше агрессивность, тем реже он делает подкаты, 
+-- +1 - чем выше агрессивность, тем чаще он делает подкаты, 
+SELECT player_api_id, corr(aggression, sliding_tackle) FROM player_attributes 
+GROUP BY player_api_id HAVING corr(aggression, sliding_tackle) IS NOT NULL;
+
+-- Количественное соотношение корреляций агрессивность/подкаты
+-- ответ: у 69% футболистов корреляция позитивная
+WITH correlation as (SELECT player_api_id, corr(aggression, sliding_tackle) FROM player_attributes 
+                     GROUP BY player_api_id HAVING corr(aggression, sliding_tackle) IS NOT NULL)
+SELECT sum (case when corr < 0 then 1 else 0 end) as neg,
+       sum (case when corr = 0 then 1 else 0 end) as zero,
+       sum (case when corr > 0 then 1 else 0 end) as pos FROM correlation;
+
